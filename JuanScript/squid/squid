@@ -1,0 +1,126 @@
+#!/bin/bash
+SCRIPT_PATH=$(realpath "$0")
+cat <<SQUID >/etc/squid/squid.conf
+acl localnet src 0.0.0.1-0.255.255.255
+acl ipv6 src fd00:abcd:1236::/64
+acl SSL_ports port 443
+acl Safe_ports port 0-65535
+acl CONNECT method CONNECT
+acl VPN dst $(wget -4qO- http://ipinfo.io/ip)/32
+http_access allow localhost manager
+http_access deny manager
+http_access allow VPN
+http_access allow ipv6
+http_access allow localhost
+http_access deny all
+http_access allow !Safe_ports
+http_access allow CONNECT !SSL_ports
+dns_nameservers 1.1.1.1 1.0.0.1
+http_port 8000
+refresh_pattern ^ftp: 1440 20% 10080
+refresh_pattern ^gopher: 1440 0% 1440
+refresh_pattern -i (/cgi-bin/|\?) 0 0% 0
+refresh_pattern . 0 20% 4320
+visible_hostname localhost
+coredump_dir /var/spool/squid
+max_filedescriptors 4096
+workers 4
+cache_dir ufs /var/spool/squid 10000 16 256
+error_directory /etc/squid/pages/en
+SQUID
+
+mkdir -p /etc/squid/pages
+cp -r /usr/share/squid-langpack/en /etc/squid/pages/
+
+cat << error > /etc/squid/pages/en/ERR_INVALID_URL
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Made by JuanScript</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background-color: #1c1c1c; /* Dark background */
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            text-align: center;
+        }
+
+        .small-text {
+            font-size: 20px;
+            color: white;
+            margin: 0;
+        }
+
+        .big-text {
+            font-size: 80px;
+            font-weight: bold;
+            margin: 0;
+            color: #ffffff;
+            animation: color-change 3s infinite;
+        }
+
+        @keyframes color-change {
+            0% {
+                color: #ff4f81;
+            }
+            33% {
+                color: #4fffb0;
+            }
+            66% {
+                color: #4f81ff;
+            }
+            100% {
+                color: #ff4f81;
+            }
+        }
+
+        .buttons {
+            margin-top: 20px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            font-size: 20px;
+            color: white;
+            background-color: #3b5998; /* Default Facebook color */
+            border: none;
+            border-radius: 5px;
+            text-decoration: none;
+            margin: 0 10px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .button.telegram {
+            background-color: #0088cc; /* Telegram color */
+        }
+
+        .button:hover {
+            background-color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p class="small-text">Made by</p>
+        <p class="big-text">JuanScript</p>
+
+        <div class="buttons">
+            <a href="https://www.facebook.com/skillxissue" target="_blank" class="button">Facebook</a>
+            <a href="https://t.me/juanscript" target="_blank" class="button telegram">Telegram</a>
+        </div>
+    </div>
+</body>
+</html>
+error
