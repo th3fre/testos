@@ -3,13 +3,31 @@ export DEBIAN_FRONTEND=noninteractive
 export RepoURL="th3fre/testos/main"
 export TOKEN="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"
 SCRIPT_PATH=$(realpath "$0")
-rm -rf "$SCRIPT_PATH"
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+LOCAL_JUAN_DIR="$SCRIPT_DIR/JuanScript"
 if [ "$(id -u)" -ne 0 ]; then
     echo "Please run as root."
     exit 1
 fi
 
 ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)
+        GO_ARCH="amd64"
+        HYSTERIA_ARCH="amd64"
+        LIB_ARCH="x86_64-linux-gnu"
+        ;;
+    aarch64|arm64)
+        ARCH="aarch64"
+        GO_ARCH="arm64"
+        HYSTERIA_ARCH="arm64"
+        LIB_ARCH="aarch64-linux-gnu"
+        ;;
+    *)
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+esac
 
 mkdir -p /etc/JuanScript
 timedatectl set-timezone Asia/Manila
@@ -227,13 +245,16 @@ EOF
     if [ "${NS_SUCCESS}" == "true" ]; then
         mkdir -p /etc/JuanScript
         echo "${SUBDOMAIN}.${DOMAIN_NAME}" > /etc/JuanScript/domain 
-        wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz
-        apt remove golang-go -y
-        apt autoremove -y
-        tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz
-        echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee -a /etc/profile
+        GO_TAR="go1.23.6.linux-${GO_ARCH}.tar.gz"
+        wget -q "https://go.dev/dl/${GO_TAR}" -O "/tmp/${GO_TAR}" || wget -q "https://go.dev/dl/go1.22.10.linux-${GO_ARCH}.tar.gz" -O "/tmp/${GO_TAR}"
+        apt remove golang-go -y &>/dev/null
+        rm -rf /usr/local/go
+        tar -C /usr/local -xzf "/tmp/${GO_TAR}"
+        rm -f "/tmp/${GO_TAR}"
+        export PATH=$PATH:/usr/local/go/bin
+        echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee -a /etc/profile >/dev/null
         source /etc/profile &>/dev/null
-        go version &>/dev/null
+        /usr/local/go/bin/go version &>/dev/null
         git clone https://www.bamsoftware.com/git/dnstt.git
         cd dnstt/dnstt-server
         go build
@@ -273,29 +294,57 @@ else
     echo "Failed to add A record."
 fi
 
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/squid/squid" > /tmp/squid && bash /tmp/squid
+if [ -d "$LOCAL_JUAN_DIR/squid" ] && [ -f "$LOCAL_JUAN_DIR/squid/squid" ]; then
+    bash "$LOCAL_JUAN_DIR/squid/squid"
+else
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/squid/squid" > /tmp/squid && bash /tmp/squid
+fi
+
 cd /etc/JuanScript
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanWS_${ARCH}" > JuanWS
+if [ -d "$LOCAL_JUAN_DIR" ] && [ -f "$LOCAL_JUAN_DIR/JuanWS_${ARCH}" ]; then
+    cp -f "$LOCAL_JUAN_DIR/JuanWS_${ARCH}" ./JuanWS
+    cp -f "$LOCAL_JUAN_DIR/JuanMUX_${ARCH}" ./JuanMUX
+    cp -f "$LOCAL_JUAN_DIR/JuanUDP_${ARCH}" ./JuanUDP
+    cp -f "$LOCAL_JUAN_DIR/JuanDNS" ./JuanDNS
+else
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanWS_${ARCH}" > JuanWS
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanMUX_${ARCH}" > JuanMUX
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanUDP_${ARCH}" > JuanUDP
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanDNS" > JuanDNS
+fi
 echo "MSG=\"$RESPONSE\"" >> /etc/JuanScript/juanws.conf
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanMUX_${ARCH}" > JuanMUX
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanUDP_${ARCH}" > JuanUDP
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/JuanDNS" > JuanDNS
 chmod +x *
+
 cd /etc/openvpn/certificates
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/ovpn.zip" > ovpn.zip
-unzip *.zip
+if [ -d "$LOCAL_JUAN_DIR" ] && [ -f "$LOCAL_JUAN_DIR/ovpn.zip" ]; then
+    cp -f "$LOCAL_JUAN_DIR/ovpn.zip" ./ovpn.zip
+else
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/ovpn.zip" > ovpn.zip
+fi
+unzip -o *.zip
 rm -f *.zip
+
 cd /etc/xray
 bash -c "$(curl -4L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/config.json" > config.json
+
+if [ -d "$LOCAL_JUAN_DIR/xray" ]; then
+    cp -f "$LOCAL_JUAN_DIR/xray/config.json" ./config.json
+    cp -f "$LOCAL_JUAN_DIR/xray/add.sh" /usr/local/bin/xray-add && chmod +x /usr/local/bin/xray-add
+    cp -f "$LOCAL_JUAN_DIR/xray/xraymenu.sh" /usr/local/bin/xray-menu && chmod +x /usr/local/bin/xray-menu
+    cp -f "$LOCAL_JUAN_DIR/xray/list.sh" /usr/local/bin/xray-list && chmod +x /usr/local/bin/xray-list
+    cp -f "$LOCAL_JUAN_DIR/xray/del.sh" /usr/local/bin/xray-del && chmod +x /usr/local/bin/xray-del
+    cp -f "$LOCAL_JUAN_DIR/xray/showpath.sh" /usr/local/bin/xray-showpath && chmod +x /usr/local/bin/xray-showpath
+else
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/config.json" > config.json
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/add.sh" > /usr/local/bin/xray-add && chmod +x /usr/local/bin/xray-add
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/xraymenu.sh" > /usr/local/bin/xray-menu && chmod +x /usr/local/bin/xray-menu
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/list.sh" > /usr/local/bin/xray-list && chmod +x /usr/local/bin/xray-list
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/del.sh" > /usr/local/bin/xray-del && chmod +x /usr/local/bin/xray-del
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/showpath.sh" > /usr/local/bin/xray-showpath && chmod +x /usr/local/bin/xray-showpath
+fi
 UUID=$(xray uuid)
 sed -i "s/XRAYUUID/${UUID}/g" /etc/xray/config.json
 echo $UUID > /etc/xray/uuid
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/add.sh" > /usr/local/bin/xray-add && chmod +x /usr/local/bin/xray-add
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/xraymenu.sh" > /usr/local/bin/xray-menu && chmod +x /usr/local/bin/xray-menu
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/list.sh" > /usr/local/bin/xray-list && chmod +x /usr/local/bin/xray-list
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/del.sh" > /usr/local/bin/xray-del && chmod +x /usr/local/bin/xray-del
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/xray/showpath.sh" > /usr/local/bin/xray-showpath && chmod +x /usr/local/bin/xray-showpath
 
 sudo chown -R www-data:www-data /var/log/xray
 rm -rf /etc/systemd/system/xray.service.d
@@ -411,7 +460,8 @@ LimitNOFILE=1000000
 [Install]
 WantedBy=multi-user.target' > /etc/systemd/system/JuanSSH.service
 
-sudo ln -s /etc/JuanSSH/libexec/sshd-auth /usr/libexec/sshd-
+mkdir -p /usr/libexec
+sudo ln -sf /etc/JuanSSH/libexec/sshd-auth /usr/libexec/sshd-auth
 systemctl daemon-reload
 systemctl enable JuanSSH.service
 
@@ -488,7 +538,29 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-cat <<'TCP' > /etc/openvpn/server/tcp.conf
+PAM_PLUGIN=""
+for p in \
+    "/usr/lib/${LIB_ARCH}/openvpn/plugins/openvpn-plugin-auth-pam.so" \
+    "/usr/lib/openvpn/plugins/openvpn-plugin-auth-pam.so" \
+    "/usr/lib64/openvpn/plugins/openvpn-plugin-auth-pam.so" \
+    "/usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so" \
+    "/usr/lib/aarch64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so"; do
+    if [ -f "$p" ]; then
+        PAM_PLUGIN="$p"
+        break
+    fi
+done
+
+if [ -z "$PAM_PLUGIN" ]; then
+    PAM_PLUGIN=$(find /usr/lib -name "openvpn-plugin-auth-pam.so" 2>/dev/null | head -n 1)
+fi
+
+if [ -z "$PAM_PLUGIN" ]; then
+    echo "OpenVPN error: openvpn-plugin-auth-pam.so not found."
+    exit 1
+fi
+
+cat <<TCP > /etc/openvpn/server/tcp.conf
 port 1194
 proto tcp
 dev tun
@@ -507,6 +579,8 @@ push "sndbuf 0"
 push "rcvbuf 0"
 sndbuf 0
 rcvbuf 0
+data-ciphers AES-128-GCM:AES-256-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-128-GCM
 cipher AES-128-GCM
 persist-key
 persist-tun
@@ -520,19 +594,38 @@ status /etc/openvpn/tcp_stats.log 3
 log /etc/openvpn/tcp.log
 verb 3
 script-security 3
-plugin /usr/lib/aarch64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so /etc/pam.d/login
+plugin ${PAM_PLUGIN} /etc/pam.d/login
 TCP
 
-plugin_file=$(find / -name openvpn-plugin-auth-pam.so 2>/dev/null | head -n 1)
-if [ -z "$plugin_file" ]; then
-   echo "OpenVPN error, contact juanscriptxx98@gmail.com"
-    exit 1
-fi
-sed -i "s|^plugin.*|plugin $(printf '%q' "$plugin_file") /etc/pam.d/login|" /etc/openvpn/server/*.conf
+# Generate client .ovpn profile with inline CA
+cat <<EOF > /etc/openvpn/client-tcp.ovpn
+client
+dev tun
+proto tcp
+remote ${SUBDOMAIN}.${DOMAIN_NAME} 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+auth-user-pass
+data-ciphers AES-128-GCM:AES-256-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-128-GCM
+cipher AES-128-GCM
+verb 3
+<ca>
+$(cat /etc/openvpn/certificates/ca.crt 2>/dev/null)
+</ca>
+EOF
+cp -f /etc/openvpn/client-tcp.ovpn /root/client-tcp.ovpn 2>/dev/null
 
 CONFIG_FILE="/etc/udp/config.json"
 DOWNLOAD_PATH="/etc/udp/hysteria"
-curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/udp/udp_service.sh" > udp_service.sh && bash udp_service.sh
+if [ -d "$LOCAL_JUAN_DIR/udp" ] && [ -f "$LOCAL_JUAN_DIR/udp/udp_service.sh" ]; then
+    bash "$LOCAL_JUAN_DIR/udp/udp_service.sh"
+else
+    curl -sk -H "Authorization: token ${TOKEN}" -H "Accept: application/vnd.github.v3.raw" "https://raw.githubusercontent.com/${RepoURL}/JuanScript/udp/udp_service.sh" > udp_service.sh && bash udp_service.sh
+fi
 domainName="$(cat /etc/JuanScript/domain)"
 case "$choice" in
     a)
@@ -558,16 +651,18 @@ case "$choice" in
   }
 }
 UDP
-        DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/v1.3.5/hysteria-linux-amd64"
-        wget --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 10 -O $DOWNLOAD_PATH $DOWNLOAD_URL
+        DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/v1.3.5/hysteria-linux-${HYSTERIA_ARCH}"
+        wget --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 10 -O $DOWNLOAD_PATH "$DOWNLOAD_URL"
+        chmod +x "$DOWNLOAD_PATH"
         ;;
     b)
         echo "You choose Hysteria UDP 2.x (latest)"
-         LATEST_VERSION=$(curl -4 --silent "https://api.github.com/repos/apernet/hysteria/releases/latest" \
+        LATEST_VERSION=$(curl -4 --silent "https://api.github.com/repos/apernet/hysteria/releases/latest" \
         | grep '"tag_name":' \
         | sed -E 's/.*"([^"]+)".*/\1/')
-        DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_VERSION}/hysteria-linux-amd64"
-        wget --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 10 -O $DOWNLOAD_PATH $DOWNLOAD_URL
+        DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_VERSION}/hysteria-linux-${HYSTERIA_ARCH}"
+        wget --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 10 -O $DOWNLOAD_PATH "$DOWNLOAD_URL"
+        chmod +x "$DOWNLOAD_PATH"
         cat << UDP > /etc/udp/config.json
 {
     "listen": ":36712",
@@ -624,7 +719,7 @@ WorkingDirectory=/etc/udp
 
 # Run before hysteria starts
 ExecStartPre=/bin/rm -f /tmp/hysteria_sessions.map
-ExecStartPre=/usr/bin/tee /tmp/hysteria_sessions.map
+ExecStartPre=/usr/bin/touch /tmp/hysteria_sessions.map
 ExecStart=/etc/udp/hysteria server --config $CONFIG_FILE
 
 [Install]
@@ -676,6 +771,7 @@ systemctl enable udp.service &>/dev/null
 systemctl enable xray.service &>/dev/null
 systemctl enable squid.service &>/dev/null
 systemctl enable openvpn-server@tcp &>/dev/null
+systemctl restart openvpn-server@tcp &>/dev/null
 systemctl enable JuanDNS &>/dev/null
 
 CONFIG="/etc/xray/config.json"
@@ -827,8 +923,9 @@ while true; do
     echo "4) Xray Menu"
     echo "5) Exit"
     echo "6) Reboot Settings"
+    echo "7) Show OpenVPN Config (.ovpn)"
     echo "=============================="
-    read -p "Choose an option [1-6]: " choice
+    read -p "Choose an option [1-7]: " choice
 
     case $choice in
         1)
@@ -843,6 +940,7 @@ while true; do
             useradd -m -s /bin/false "$username"
             echo "$username:$password" | chpasswd
             echo "User '$username' created successfully."
+            echo "OpenVPN client profile available at: /root/client-tcp.ovpn"
             read -p "Press Enter to continue..."
             ;;
         2)
@@ -873,6 +971,23 @@ while true; do
             ;;
         6)
             reboot_menu
+            ;;
+        7)
+            clear
+            echo "=========================================="
+            echo "       OpenVPN Client Configuration"
+            echo "=========================================="
+            echo "Config file path: /etc/openvpn/client-tcp.ovpn"
+            echo "Quick copy path : /root/client-tcp.ovpn"
+            echo "------------------------------------------"
+            if [ -f /etc/openvpn/client-tcp.ovpn ]; then
+                head -n 20 /etc/openvpn/client-tcp.ovpn
+                echo "... [CA certificate is embedded inside file] ..."
+            else
+                echo "File not found! Please check /etc/openvpn/"
+            fi
+            echo "=========================================="
+            read -p "Press Enter to continue..."
             ;;
         *)
             echo "Invalid choice!"
